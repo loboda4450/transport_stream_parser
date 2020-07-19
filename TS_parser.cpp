@@ -7,13 +7,7 @@ class xTS {
     public:
         static constexpr uint32_t TS_PacketLength = 188;
         static constexpr uint32_t TS_HeaderLength = 4;
-
         static constexpr uint32_t PES_HeaderLength = 6;
-
-//        static constexpr uint32_t BaseClockFrequency_Hz         =    90000; //Hz
-//        static constexpr uint32_t ExtendedClockFrequency_Hz     = 27000000; //Hz
-//        static constexpr uint32_t BaseClockFrequency_kHz        =       90; //kHz
-//        static constexpr uint32_t ExtendedClockFrequency_kHz    =    27000; //kHz
         static constexpr uint32_t BaseToExtendedClockMultiplier =      300;
 };
 
@@ -63,13 +57,9 @@ class xTS_PacketHeader {
 
     public:
         uint8_t getSyncByte() const { return syncByte; }
-//        bool isTransportErrorIndicator() const { return transportErrorIndicator; }
         bool isPayloadUnitStartIndicator() const { return payloadUnitStartIndicator; }
-//        bool isTransportPriority() const { return transportPriority; }
         uint16_t getPacketIdentifier() const { return packetIdentifier; }
-//        uint8_t getTransportScramblingControl() const { return transportScramblingControl; }
         uint8_t getAdaptationFieldControl() const { return adaptationFieldControl; }
-//        uint8_t getContinuityCounter() const { return continuityCounter; }
 
     public:
         bool hasAdaptationField() const { return adaptationFieldControl == 2 or adaptationFieldControl == 3; }
@@ -198,8 +188,6 @@ class xTS_AdaptationField {
         }
 
         uint32_t getNumBytes() const { return adaptationFieldLength; }
-
-        bool isRandomAccessIndicator() const { return randomAccessIndicator; }
 };
 
 class xPES_PacketHeader {
@@ -285,20 +273,16 @@ class xPES_PacketHeader {
                     PESCRCFlag = (Input[AdaptationFieldOffset + 7] & 0b00000010) != 0;
                     PESExtensionFlag = (Input[AdaptationFieldOffset + 7] & 0b00000001) != 0;
                     PESHeaderDataLength += Input[AdaptationFieldOffset + 8] + 3;
-                    if (PTSDTSFlags == 2 and (Input[AdaptationFieldOffset + 9] & 0b11110000) == 32) {
+                    if ((PTSDTSFlags & 0b00000010) != 0 and (Input[AdaptationFieldOffset + 9] & 0b11110000) == 32) {
                         PTS = (((uint64_t)(Input[AdaptationFieldOffset + 9] & 0b00001110)) << 29 |
                                 ((uint64_t)(Input[AdaptationFieldOffset + 10])) << 21 |
                                 ((uint64_t)(Input[AdaptationFieldOffset + 11] & 0b11111110)) << 14 |
                                 ((uint64_t)(Input[AdaptationFieldOffset + 12])) << 7 |
                                 ((uint64_t)(Input[AdaptationFieldOffset + 13] & 0b11111110)) >> 1);
 
-                    } else if (PTSDTSFlags == 3 and (Input[AdaptationFieldOffset + 9] & 0b11110000) == 48) {
-                        PTS = (((uint64_t)(Input[AdaptationFieldOffset + 9] & 0b00001110)) << 29 |
-                               ((uint64_t)(Input[AdaptationFieldOffset + 10])) << 21 |
-                               ((uint64_t)(Input[AdaptationFieldOffset + 11] & 0b11111110)) << 14 |
-                               ((uint64_t)(Input[AdaptationFieldOffset + 12])) << 7 |
-                               ((uint64_t)(Input[AdaptationFieldOffset + 13] & 0b11111110)) >> 1);
+                    }
 
+                    if ((PTSDTSFlags & 0b00000001) != 0 and (Input[AdaptationFieldOffset + 9] & 0b11110000) == 48) {
                         DTS = (((uint64_t)(Input[AdaptationFieldOffset + 14] & 0b00001110)) << 29 |
                                 ((uint64_t)(Input[AdaptationFieldOffset + 15])) << 21 |
                                 ((uint64_t)(Input[AdaptationFieldOffset + 16] & 0b11111110)) << 14 |
@@ -312,19 +296,21 @@ class xPES_PacketHeader {
         };
 
         void Print() const {
-            printf(" PSCP=%1d SID=%3d L=%4d PL=%4d HL=%d DL=%4d PTS=%lu", m_PacketStartCodePrefix, m_StreamId, m_PacketLength,
+            printf(" PSCP=%1d SID=%3d L=%4d PL=%4d HL=%d DL=%4d", m_PacketStartCodePrefix, m_StreamId, m_PacketLength,
                    (m_PacketLength == 0 ? 0 : m_PacketLength + xTS::PES_HeaderLength), PESHeaderDataLength,
-                   (m_PacketLength == 0 ? 0 : getPacketLength() - getPesHeaderDataLength()), PTS);
+                   (m_PacketLength == 0 ? 0 : getPacketLength() - getPesHeaderDataLength()));
+            if((PTSDTSFlags & 0b00000010) != 0) {
+                printf(" PTS=%lu", PTS);
+            }
+
+            if((PTSDTSFlags & 0b00000001) != 0){
+                printf(" DTS=%lu", DTS);
+            }
         };
 
     public:
         //PES packet header
-        uint32_t getPacketStartCodePrefix() const { return m_PacketStartCodePrefix; }
-
-        uint8_t getStreamId() const { return m_StreamId; }
-
         uint16_t getPacketLength() const { return m_PacketLength + xTS::PES_HeaderLength; }
-
         uint8_t getPesHeaderDataLength() const { return PESHeaderDataLength; }
 };
 
@@ -345,6 +331,7 @@ protected:
     FILE *ofs = nullptr;
     //buffer
     uint8_t *m_Buffer = nullptr;
+    uint8_t *m_TmpBuffer = nullptr;
     uint32_t m_BufferSize;
     uint8_t m_pesOffset;
     uint32_t m_DataOffset;
@@ -360,14 +347,14 @@ public:
 
     void Init(int32_t PID) {
         m_PID = PID;
-        if (m_PID == 136) ofs = fopen("/home/loobson/Politechnika/rewrite/PID136.mp2", "wb");
-//        else if (m_PID == 174) ofs = fopen(R"(E:\CLion\parser\PID174.264)", "wb");
+        if (m_PID == 136) ofs = fopen("/*PATH TO YOUR .mp2 SAVE FILE*/", "wb");
+        else if (m_PID == 174) ofs = fopen("/*PATH TO YOUR .264 SAVE FILE*/", "wb");
     };
 
     eResult AbsorbPacket(const uint8_t *TransportStreamPacket, const xTS_PacketHeader *PacketHeader,
                          const xTS_AdaptationField *AdaptationField) {
         if (PacketHeader->getPacketIdentifier() == m_PID) {
-            if (PacketHeader->isPayloadUnitStartIndicator() /*and AdaptationField->isRandomAccessIndicator()*/) {
+            if (PacketHeader->isPayloadUnitStartIndicator()) {
                 if (m_Started) {
                     m_Started = false;
                     fwrite(m_Buffer, m_BufferSize, 1, ofs);
@@ -379,7 +366,7 @@ public:
                     xBufferReset();
                     m_pesOffset = m_PESH.Parse(TransportStreamPacket,
                                                 xTS::TS_HeaderLength + AdaptationField->getNumBytes());
-                    m_BufferSize = m_PESH.getPacketLength() - m_PESH.getPesHeaderDataLength();
+                    if(m_PID != 174) m_BufferSize = m_PESH.getPacketLength() - m_PESH.getPesHeaderDataLength();
                     xBufferAppend(TransportStreamPacket, m_pesOffset);
                     return eResult::AssemblingStarted;
                 }
@@ -396,15 +383,18 @@ public:
     };
 
     void PrintPESH() const { m_PESH.Print(); }
+    uint8_t *getBuffer() const { return m_Buffer; }
     int32_t getNumPacketBytes() const { return m_BufferSize; }
+    FILE *getOfs() const { return ofs; }
 
 protected:
     void xBufferReset() {
         m_LastContinuityCounter = 0;
         m_BufferSize = 0;
         m_DataOffset = 0;
-        delete[] m_Buffer;
+        delete [] m_Buffer;
         m_Buffer = nullptr;
+        m_TmpBuffer = nullptr;
         m_pesOffset = 0;
         m_DataOffset = 0;
 
@@ -412,38 +402,41 @@ protected:
     };
 
     void xBufferAppend(const uint8_t *Data, int32_t Size) {
-        if (m_PID == 136) {
-            if (m_Buffer == nullptr) {
+        if (m_Buffer == nullptr) {
+            if(m_PID == 174) m_BufferSize += xTS::TS_PacketLength - Size;
+            m_DataOffset += xTS::TS_PacketLength - Size;
+            m_Buffer = new uint8_t[m_BufferSize];
+            copy(Data + Size, Data + xTS::TS_PacketLength, m_Buffer);
+
+        } else {
+            if (m_PID == 136) {
+                copy(Data + Size, Data + xTS::TS_PacketLength, m_Buffer + m_DataOffset);
                 m_DataOffset += xTS::TS_PacketLength - Size;
-                m_Buffer = new uint8_t[m_BufferSize];
-                copy(Data + Size, Data + xTS::TS_PacketLength, m_Buffer);
 
-                return;
-            } else {
-//                auto *m_TmpBuffer = new uint8_t[m_BufferSize];
-//                move(m_Buffer, m_Buffer + m_DataOffset, m_TmpBuffer);
-//
-//                delete[] m_Buffer;
-//                m_Buffer = m_TmpBuffer;
-                for (uint8_t i = Size; i < xTS::TS_PacketLength; i++) {
-                    m_Buffer[m_DataOffset++] = Data[i];
-                }
+            } else if (m_PID == 174) {
+                m_BufferSize += (xTS::TS_PacketLength - Size);
+                m_TmpBuffer = new uint8_t[m_BufferSize];
+                move(m_Buffer + 0, m_Buffer + m_DataOffset, m_TmpBuffer);
 
-                return;
+                delete[] m_Buffer;
+                m_Buffer = m_TmpBuffer;
+
+                copy(Data + Size, Data + xTS::TS_PacketLength, m_Buffer + m_DataOffset);
+                m_DataOffset += xTS::TS_PacketLength - Size;
             }
         }
     }
 };
 
 int main( int argc, char *argv[ ], char *envp[ ]) {
-    FILE *file = fopen("/home/loobson/Politechnika/rewrite/example_new.ts", "rb");
+    FILE *file = fopen("/*PATH TO YOUR .TS FILE*/", "rb");
     int32_t PID;
 
     if (file == nullptr) {
         printf("wrong file name\n");
         return EXIT_FAILURE;
     }
-    printf("Provide PID you want to parse (136 corrupted save, 174 no save): ");
+    printf("Provide PID you want to parse: ");
     cin >> PID;
 
     uint8_t TS_PacketBuffer[xTS::TS_PacketLength];
@@ -484,8 +477,9 @@ int main( int argc, char *argv[ ], char *envp[ ]) {
             printf("\n");
         }
         TS_PacketId++;
-//        if(TS_PacketId == 20) break;
     }
+    fwrite(PES_Assembler.getBuffer(), PES_Assembler.getNumPacketBytes(), 1, PES_Assembler.getOfs());
+    fclose(PES_Assembler.getOfs());
     fclose(file);
     return 0;
 }
