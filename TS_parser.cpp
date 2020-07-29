@@ -347,8 +347,8 @@ public:
 
     void Init(int32_t PID) {
         m_PID = PID;
-        if (m_PID == 136) ofs = fopen("/*PATH TO YOUR .mp2 SAVE FILE*/", "wb");
-        else if (m_PID == 174) ofs = fopen("/*PATH TO YOUR .264 SAVE FILE*/", "wb");
+        if (m_PID == 136) ofs = fopen("/home/loobson/Politechnika/rewrite/pid136.mp2", "wb");
+        else if (m_PID == 174) ofs = fopen("/home/loobson/Politechnika/rewrite/pid174.264", "wb");
     };
 
     eResult AbsorbPacket(const uint8_t *TransportStreamPacket, const xTS_PacketHeader *PacketHeader,
@@ -379,6 +379,7 @@ public:
                 return eResult::AssemblingContinue;
             }
         } else return eResult::UnexpectedPID;
+
         return eResult::AssemblingStarted;
     };
 
@@ -429,24 +430,24 @@ protected:
 };
 
 int main( int argc, char *argv[ ], char *envp[ ]) {
-    FILE *file = fopen("/*PATH TO YOUR .TS FILE*/", "rb");
-    int32_t PID;
+    FILE *file = fopen("/home/loobson/Politechnika/rewrite/example_new.ts", "rb");
 
     if (file == nullptr) {
         printf("wrong file name\n");
         return EXIT_FAILURE;
     }
-    printf("Provide PID you want to parse: ");
-    cin >> PID;
 
     uint8_t TS_PacketBuffer[xTS::TS_PacketLength];
     xTS_PacketHeader TS_PacketHeader;
     xTS_AdaptationField TS_PacketAdaptationField;
-    xPES_Assembler PES_Assembler;
+    xPES_Assembler PES_Assembler136;
+    xPES_Assembler PES_Assembler174;
+    xPES_Assembler::eResult Result;
 
     int32_t TS_PacketId = 0;
 
-    PES_Assembler.Init(PID);
+    PES_Assembler136.Init(136);
+    PES_Assembler174.Init(174);
 
     while (!feof(file)) {
         size_t NumRead = fread(TS_PacketBuffer, 1, xTS::TS_PacketLength, file);
@@ -455,7 +456,7 @@ int main( int argc, char *argv[ ], char *envp[ ]) {
         TS_PacketHeader.Reset();
         TS_PacketHeader.Parse(TS_PacketBuffer);
 
-        if (TS_PacketHeader.getSyncByte() == 71 and TS_PacketHeader.getPacketIdentifier() == PID) {
+        if (TS_PacketHeader.getSyncByte() == 71) {
             printf("%010d ", TS_PacketId);
             TS_PacketHeader.Print();
             TS_PacketAdaptationField.Reset();
@@ -465,21 +466,46 @@ int main( int argc, char *argv[ ], char *envp[ ]) {
                 TS_PacketAdaptationField.Print();
             }
 
-            xPES_Assembler::eResult Result = PES_Assembler.AbsorbPacket(TS_PacketBuffer, &TS_PacketHeader,
-                                                                        &TS_PacketAdaptationField);
+            if (TS_PacketHeader.getPacketIdentifier() == 136) {
+                Result = PES_Assembler136.AbsorbPacket(TS_PacketBuffer, &TS_PacketHeader, &TS_PacketAdaptationField);
+            } else if (TS_PacketHeader.getPacketIdentifier() == 174) {
+                Result = PES_Assembler174.AbsorbPacket(TS_PacketBuffer, &TS_PacketHeader, &TS_PacketAdaptationField);
+            }
+
+
             switch (Result) {
-                case xPES_Assembler::eResult::StreamPacketLost  : printf(" PES: PcktLost"); break;
-                case xPES_Assembler::eResult::AssemblingStarted :printf(" PES: Started assembling,");PES_Assembler.PrintPESH();break;
-                case xPES_Assembler::eResult::AssemblingContinue:printf(" PES: Continue");break;
-                case xPES_Assembler::eResult::AssemblingFinished:printf(" PES: Finished, Len=%4d", PES_Assembler.getNumPacketBytes()); break;
-                default: break;
+                case xPES_Assembler::eResult::StreamPacketLost  :
+                    printf(" PES: PcktLost");
+                    break;
+                case xPES_Assembler::eResult::AssemblingStarted :
+                    printf(" PES: Started assembling,");
+                    if (TS_PacketHeader.getPacketIdentifier() == 136) PES_Assembler136.PrintPESH();
+                    else if (TS_PacketHeader.getPacketIdentifier() == 174) PES_Assembler174.PrintPESH();
+                    break;
+                case xPES_Assembler::eResult::AssemblingContinue:
+                    printf(" PES: Continue");
+                    break;
+                case xPES_Assembler::eResult::AssemblingFinished:
+                    if (TS_PacketHeader.getPacketIdentifier() == 136)
+                        printf(" PES: Finished, Len=%4d", PES_Assembler136.getNumPacketBytes());
+                    else if (TS_PacketHeader.getPacketIdentifier() == 174)
+                        printf(" PES: Finished, Len=%4d", PES_Assembler174.getNumPacketBytes());
+                    break;
+                default:
+                    break;
             }
             printf("\n");
         }
         TS_PacketId++;
     }
-    fwrite(PES_Assembler.getBuffer(), PES_Assembler.getNumPacketBytes(), 1, PES_Assembler.getOfs());
-    fclose(PES_Assembler.getOfs());
+    if(PES_Assembler136.getOfs()){
+        fwrite(PES_Assembler136.getBuffer(), PES_Assembler136.getNumPacketBytes(), 1, PES_Assembler136.getOfs());
+        fclose(PES_Assembler136.getOfs());
+    }
+    if(PES_Assembler174.getOfs()){
+        fwrite(PES_Assembler174.getBuffer(), PES_Assembler174.getNumPacketBytes(), 1, PES_Assembler174.getOfs());
+        fclose(PES_Assembler174.getOfs());
+    }
     fclose(file);
     return 0;
 }
